@@ -87,6 +87,7 @@ def aplicar_estilo_rihanna_original():
             padding: 20px;
             border-left: 5px solid #FF69B4;
             margin-bottom: 20px;
+            min-height: 280px;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -141,6 +142,36 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
 # --- INTERFACE ---
 st.markdown("<h1>💎 DIAMOND TAX</h1>", unsafe_allow_html=True)
 
+# SEÇÃO SEMPRE VISÍVEL: PASSO A PASSO E OBJETIVOS
+with st.container():
+    m_col1, m_col2 = st.columns(2)
+    with m_col1:
+        st.markdown("""
+        <div class="instrucoes-card">
+            <h3>📖 Passo a Passo</h3>
+            <ol>
+                <li><b>Relatório SIEG:</b> Suba o arquivo CSV ou XLSX de Status para filtrar notas canceladas.</li>
+                <li><b>Arquivos XML:</b> Arraste seus arquivos XML ou pastas ZIP para a área de upload.</li>
+                <li><b>Processamento:</b> Clique no botão <b>"INICIAR APURAÇÃO DIAMANTE"</b>.</li>
+                <li><b>Download:</b> Baixe o Excel final com as abas de listagem e resumo por estado.</li>
+            </ol>
+        </div>
+        """, unsafe_allow_html=True)
+    with m_col2:
+        st.markdown("""
+        <div class="instrucoes-card">
+            <h3>📊 O que será obtido?</h3>
+            <ul>
+                <li><b>Cálculo de DIFAL/ST/FCP:</b> Apuração automática separada por UF.</li>
+                <li><b>Regra Rio de Janeiro:</b> Lógica aplicada para abatimento de FCP no DIFAL (RJ).</li>
+                <li><b>Relatório Inteligente:</b> Excel sem linhas de grade, com bordas e destaque Rosa nas IESTs.</li>
+                <li><b>Fórmulas Vivas:</b> O arquivo gerado contém fórmulas para conferência de saldos.</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+st.markdown("---")
+
 if 'confirmado' not in st.session_state: st.session_state['confirmado'] = False
 
 with st.sidebar:
@@ -156,36 +187,6 @@ with st.sidebar:
         st.rerun()
 
 if st.session_state['confirmado']:
-    # --- NOVO: SEÇÃO DE MANUAL E RESULTADOS (LADO A LADO) ---
-    with st.container():
-        m_col1, m_col2 = st.columns(2)
-        with m_col1:
-            st.markdown("""
-            <div class="instrucoes-card">
-                <h3>📖 Passo a Passo</h3>
-                <ol>
-                    <li><b>Relatório SIEG:</b> Suba o arquivo CSV ou XLSX de Status para filtrar notas canceladas.</li>
-                    <li><b>Arquivos XML:</b> Arraste seus arquivos XML ou pastas ZIP para a área de upload.</li>
-                    <li><b>Processamento:</b> Clique no botão <b>"INICIAR APURAÇÃO DIAMANTE"</b>.</li>
-                    <li><b>Download:</b> Baixe o Excel final com as abas de listagem e resumo por estado.</li>
-                </ol>
-            </div>
-            """, unsafe_allow_html=True)
-        with m_col2:
-            st.markdown("""
-            <div class="instrucoes-card">
-                <h3>📊 O que será obtido?</h3>
-                <ul>
-                    <li><b>Cálculo de DIFAL/ST/FCP:</b> Apuração automática separada por UF.</li>
-                    <li><b>Regra Rio de Janeiro:</b> Lógica aplicada para abatimento de FCP no DIFAL (RJ).</li>
-                    <li><b>Relatório Inteligente:</b> Excel sem linhas de grade, com bordas e destaque Rosa nas IESTs.</li>
-                    <li><b>Fórmulas Vivas:</b> O arquivo gerado contém fórmulas para conferência de saldos.</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-
-    st.markdown("---")
-    
     st.info(f"🏢 Empresa: {cnpj_limpo}")
     file_status = st.file_uploader("1. Suba o relatório de STATUS (SIEG)", type=['csv', 'xlsx'])
     uploaded_files = st.file_uploader("2. Arraste seus XMLs ou ZIP aqui:", accept_multiple_files=True)
