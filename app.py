@@ -9,7 +9,6 @@ st.set_page_config(page_title="Auditoria DIFAL ST FECP - Sentinela", layout="wid
 
 UFS_BRASIL = ['AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT', 'PA', 'PB', 'PE', 'PI', 'PR', 'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO']
 
-# LISTA DE CFOPs DE DEVOLUÇÃO (Abatem imposto no Bloco 2)
 CFOP_DEVOLUCAO = [
     '1201', '1202', '1203', '1204', '1410', '1411', '1660', '1661', '1662',
     '2201', '2202', '2203', '2204', '2410', '2411', '2660', '2661', '2662',
@@ -38,7 +37,6 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
         infNFe = root.find('.//infNFe')
         chave = infNFe.attrib.get('Id', '')[3:] if infNFe is not None else ""
         
-        # --- FILTRO DE CANCELADAS E DUPLICADAS ---
         if not chave or chave in chaves_processadas or chave in chaves_canceladas:
             return []
         
@@ -53,7 +51,6 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
             prod = det.find('prod')
             cfop = buscar_tag_recursiva('CFOP', prod)
 
-            # --- LÓGICA DE FLUXO ---
             if cnpj_emit == cnpj_alvo and tp_nf == "1":
                 tipo = "SAIDA"
             elif cfop in CFOP_DEVOLUCAO:
@@ -81,12 +78,10 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
         return detalhes
     except: return []
 
-# --- INTERFACE ---
-st.title("🛡️ Sentinela: Auditoria com Filtro SIEG")
+st.title("🛡️ Sentinela: Auditoria com Regra RJ")
 
 st.sidebar.subheader("1. Lista de Status (SIEG)")
 file_status = st.sidebar.file_uploader("Suba o relatório CSV/XLSX da SIEG", type=['csv', 'xlsx'])
-
 cnpj_empresa = st.sidebar.text_input("CNPJ Auditado (apenas números)")
 uploaded_files = st.file_uploader("Suba seus XMLs ou ZIP", accept_multiple_files=True)
 
@@ -94,21 +89,14 @@ chaves_canceladas = set()
 
 if file_status:
     try:
-        # Pula as 2 primeiras linhas de título da SIEG
         if file_status.name.endswith('.csv'):
             df_status = pd.read_csv(file_status, skiprows=2, sep=',', encoding='utf-8')
         else:
             df_status = pd.read_excel(file_status, skiprows=2)
-        
-        # Coluna 10 (Chave) e 14 (Status)
-        col_chave = df_status.columns[10]
-        col_situacao = df_status.columns[14]
-        
-        # FILTRO ROBUSTO: Procura qualquer variação de "CANCEL"
+        col_chave, col_situacao = df_status.columns[10], df_status.columns[14]
         mask_cancel = df_status[col_situacao].astype(str).str.upper().str.contains("CANCEL", na=False)
         canceladas = df_status[mask_cancel]
         chaves_canceladas = set(canceladas[col_chave].astype(str).str.replace('NFe', '').str.strip())
-        
         if len(chaves_canceladas) > 0:
             st.sidebar.warning(f"🚫 {len(chaves_canceladas)} notas canceladas detectadas.")
     except Exception as e:
@@ -127,7 +115,7 @@ if uploaded_files and cnpj_empresa:
     
     if dados_totais:
         df_listagem = pd.DataFrame(dados_totais)
-        st.success(f"✅ {len(chaves_unicas)} XMLs processados. Notas canceladas ignoradas.")
+        st.success(f"✅ {len(chaves_unicas)} XMLs processados.")
 
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -135,8 +123,7 @@ if uploaded_files and cnpj_empresa:
             ws_l = writer.sheets['LISTAGEM_XML']
             ws_l.set_column('A:A', 50)
             
-            workbook = writer.book
-            ws = workbook.add_worksheet('DIFAL_ST_FECP')
+            workbook, ws = writer.book, writer.book.add_worksheet('DIFAL_ST_FECP')
             fmt_tit = workbook.add_format({'bold':True, 'bg_color':'#FCD5B4', 'border':1, 'align':'center'})
             fmt_head = workbook.add_format({'bold':True, 'bg_color':'#D7E4BC', 'border':1, 'align':'center'})
             fmt_num = workbook.add_format({'num_format':'#,##0.00', 'border':1})
@@ -155,18 +142,27 @@ if uploaded_files and cnpj_empresa:
             for r, uf in enumerate(UFS_BRASIL):
                 row = r + 2 
                 ws.write(row, 0, uf, fmt_uf)
-                # O TRUQUE: Adicionei & "" na fórmula para o Excel não retornar 0 quando a célula estiver vazia
                 ws.write_formula(row, 1, f'=IFERROR(INDEX(LISTAGEM_XML!E:E, MATCH("{uf}", LISTAGEM_XML!D:D, 0)) & "", "")', fmt_uf)
                 
                 for i, col_let in enumerate(['H', 'I', 'J', 'K']): 
                     ws.write_formula(row, i+2, f'=SUMIFS(LISTAGEM_XML!{col_let}:{col_let}, LISTAGEM_XML!D:D, "{uf}", LISTAGEM_XML!C:C, "SAIDA")', fmt_num)
                     ws.write_formula(row, i+9, f'=SUMIFS(LISTAGEM_XML!{col_let}:{col_let}, LISTAGEM_XML!D:D, "{uf}", LISTAGEM_XML!C:C, "ENTRADA")', fmt_num)
+                    
                     col_s, col_e = chr(65 + i + 2), chr(65 + i + 9)
-                    ws.write_formula(row, i+16, f'=IF(B{row+1}<>"", {col_s}{row+1}-{col_e}{row+1}, {col_s}{row+1})', fmt_num)
+                    
+                    # --- AJUSTE FINO RJ (Coluna R é a i=1 no loop de Saldo) ---
+                    if i == 1: # Coluna DIFAL
+                        # Se UF for RJ, faz (Saída - Entrada - FCP Saída). Se não, (Saída - Entrada)
+                        # Onde S_DIFAL é col_s, E_DIFAL é col_e, S_FCP é a coluna J da listagem (col_s do loop i=2)
+                        # No resumo: DIFAL_TOTAL_S é col_s, FCP_TOTAL_S é Coluna E do resumo (índice 4)
+                        formula_saldo = f'=IF(B{row+1}<>"", IF(A{row+1}="RJ", {col_s}{row+1}-{col_e}{row+1}-E{row+1}, {col_s}{row+1}-{col_e}{row+1}), {col_s}{row+1})'
+                    else:
+                        formula_saldo = f'=IF(B{row+1}<>"", {col_s}{row+1}-{col_e}{row+1}, {col_s}{row+1})'
+                    
+                    ws.write_formula(row, i+16, formula_saldo, fmt_num)
                 
                 ws.write(row, 14, uf, fmt_uf); ws.write_formula(row, 15, f'=B{row+1}', fmt_uf)
 
-            # CRITÉRIO SEGURO: Só pinta se o tamanho do texto for maior que 0
             ws.conditional_format(f'A3:F{len(UFS_BRASIL)+2}', {'type':'formula', 'criteria':'=LEN($B3)>0', 'format':fmt_orange_uf})
             ws.conditional_format(f'O3:T{len(UFS_BRASIL)+2}', {'type':'formula', 'criteria':'=LEN($P3)>0', 'format':fmt_orange_uf})
 
@@ -176,4 +172,4 @@ if uploaded_files and cnpj_empresa:
                 col_let = chr(65 + c) if c < 26 else f"A{chr(65 + c - 26)}"
                 ws.write_formula(total_row, c, f'=SUM({col_let}3:{col_let}{total_row})', fmt_total)
 
-        st.download_button("💾 BAIXAR AUDITORIA CORRIGIDA", output.getvalue(), "Auditoria_SIEG_Final.xlsx")
+        st.download_button("💾 BAIXAR AUDITORIA COM REGRA RJ", output.getvalue(), "Auditoria_SIEG_RJ.xlsx")
