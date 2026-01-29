@@ -14,13 +14,11 @@ def aplicar_estilo_rihanna_original():
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;800&family=Plus+Jakarta+Sans:wght@400;700&display=swap');
 
-        /* 1. FUNDAÇÃO GRADIENTE PINK/SOFT */
         header, [data-testid="stHeader"] { display: none !important; }
         .stApp { 
             background: radial-gradient(circle at top right, #FFDEEF 0%, #F8F9FA 100%) !important; 
         }
 
-        /* 2. BOTÕES ESTILO SENTINELA (BRANCO GORDINHO) */
         div.stButton > button {
             color: #6C757D !important; 
             background-color: #FFFFFF !important; 
@@ -30,20 +28,17 @@ def aplicar_estilo_rihanna_original():
             font-weight: 800 !important;
             height: 60px !important;
             text-transform: uppercase;
-            opacity: 0.9;
             transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) !important;
             width: 100% !important;
         }
 
         div.stButton > button:hover {
             transform: translateY(-5px) !important;
-            opacity: 1 !important;
             box-shadow: 0 10px 20px rgba(255,105,180,0.2) !important;
             border-color: #FF69B4 !important;
             color: #FF69B4 !important;
         }
 
-        /* 3. UPLOADER E DOWNLOAD ESTILIZADOS */
         [data-testid="stFileUploader"] { 
             border: 2px dashed #FF69B4 !important; 
             border-radius: 20px !important;
@@ -62,7 +57,6 @@ def aplicar_estilo_rihanna_original():
             text-transform: uppercase;
         }
 
-        /* 4. TEXTOS E TÍTULOS */
         h1, h2, h3 {
             font-family: 'Montserrat', sans-serif;
             font-weight: 800;
@@ -70,17 +64,16 @@ def aplicar_estilo_rihanna_original():
             text-align: center;
         }
 
-        /* 5. MÉTRICAS E SIDEBAR */
-        [data-testid="stMetric"] {
-            background: white !important;
-            border-radius: 20px !important;
-            border: 1px solid #FFDEEF !important;
-            padding: 15px !important;
-        }
-
         [data-testid="stSidebar"] {
             background-color: #FFFFFF !important;
             border-right: 1px solid #FFDEEF !important;
+        }
+
+        /* Estilo destacado para o campo de CNPJ */
+        .stTextInput>div>div>input {
+            border: 2px solid #FFDEEF !important;
+            border-radius: 10px !important;
+            padding: 10px !important;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -135,24 +128,37 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
 # --- INTERFACE ---
 st.markdown("<h1>💎 DIAMOND TAX</h1>", unsafe_allow_html=True)
 
-# INICIALIZAÇÃO DE ESTADO
 if 'confirmado' not in st.session_state: st.session_state['confirmado'] = False
 
 with st.sidebar:
     st.markdown("### 🔍 Configuração")
-    cnpj_input = st.text_input("CNPJ DO CLIENTE")
+    
+    # AJUSTE PEDIDO: Sempre visível, com instrução de formato e placeholder
+    cnpj_input = st.text_input(
+        "CNPJ DO CLIENTE", 
+        placeholder="00.000.000/0001-00",
+        help="Digite o CNPJ da empresa que está sendo auditada. Pode conter pontos, barras ou apenas números."
+    )
+    
     cnpj_limpo = "".join(filter(str.isdigit, cnpj_input))
+    
+    # Instrução visual de formato
+    if cnpj_input and len(cnpj_limpo) != 14:
+        st.error("⚠️ O CNPJ deve ter 14 números.")
+    
     if len(cnpj_limpo) == 14:
         if st.button("✅ LIBERAR OPERAÇÃO"):
             st.session_state['confirmado'] = True
+    
     st.divider()
     if st.button("🗑️ RESETAR SISTEMA"):
         st.session_state.clear()
         st.rerun()
 
 if st.session_state['confirmado']:
-    file_status = st.file_uploader("Suba o relatório de STATUS (SIEG)", type=['csv', 'xlsx'])
-    uploaded_files = st.file_uploader("Arraste seus XMLs ou ZIP aqui:", accept_multiple_files=True)
+    st.info(f"🏢 Operação liberada para o CNPJ: {cnpj_limpo}")
+    file_status = st.file_uploader("1. Suba o relatório de STATUS (SIEG)", type=['csv', 'xlsx'])
+    uploaded_files = st.file_uploader("2. Arraste seus XMLs ou ZIP aqui:", accept_multiple_files=True)
     
     chaves_canceladas = set()
     if file_status:
@@ -162,6 +168,8 @@ if st.session_state['confirmado']:
             col_ch, col_sit = df_status.columns[10], df_status.columns[14]
             mask = df_status[col_sit].astype(str).str.upper().str.contains("CANCEL", na=False)
             chaves_canceladas = set(df_status[mask][col_ch].astype(str).str.replace('NFe', '').str.strip())
+            if len(chaves_canceladas) > 0:
+                st.sidebar.warning(f"🚫 {len(chaves_canceladas)} Notas canceladas filtradas.")
         except: st.error("Erro ao ler relatório SIEG.")
 
     if uploaded_files and st.button("🚀 INICIAR APURAÇÃO DIAMANTE"):
@@ -179,17 +187,12 @@ if st.session_state['confirmado']:
         
         if dados_totais:
             st.success("💎 Apuração Concluída!")
-            c1, c2 = st.columns(2)
-            c1.metric("📦 VOLUME ÚNICO", len(chaves_unicas))
-            c2.metric("❌ CANCELADAS", len(chaves_canceladas))
-
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 pd.DataFrame(dados_totais).to_excel(writer, sheet_name='LISTAGEM_XML', index=False)
                 workbook, ws = writer.book, writer.book.add_worksheet('DIFAL_ST_FECP')
-                
                 f_tit = workbook.add_format({'bold':True, 'bg_color':'#FF69B4', 'font_color':'#FFFFFF', 'border':1, 'align':'center'})
-                f_head = workbook.add_format({'bold':True, 'bg_color':'#F8F9FA', 'border':1, 'align':'center'})
+                f_head = workbook.add_format({'bold':True, 'bg_color':'#F8F9FA', 'font_color':'#6C757D', 'border':1, 'align':'center'})
                 f_num = workbook.add_format({'num_format':'#,##0.00', 'border':1})
                 f_orange = workbook.add_format({'bg_color': '#FFDAB9', 'border': 1, 'align':'center'})
 
@@ -208,16 +211,16 @@ if st.session_state['confirmado']:
                         ws.write_formula(row, i+2, f'=SUMIFS(LISTAGEM_XML!{col_let}:{col_let}, LISTAGEM_XML!D:D, "{uf}", LISTAGEM_XML!C:C, "SAIDA")', f_num)
                         ws.write_formula(row, i+9, f'=SUMIFS(LISTAGEM_XML!{col_let}:{col_let}, LISTAGEM_XML!D:D, "{uf}", LISTAGEM_XML!C:C, "ENTRADA")', f_num)
                         col_s, col_e = chr(65 + i + 2), chr(65 + i + 9)
-                        if i == 1: # REGRA RJ
+                        if i == 1: # REGRA DOMÍNIO RJ
                             f_sal = f'=IF(B{row+1}<>"", IF(A{row+1}="RJ", ({col_s}{row+1}-{col_e}{row+1})-(E{row+1}-L{row+1}), {col_s}{row+1}-{col_e}{row+1}), {col_s}{row+1})'
                         else:
                             f_sal = f'=IF(B{row+1}<>"", {col_s}{row+1}-{col_e}{row+1}, {col_s}{row+1})'
                         ws.write_formula(row, i+16, f_sal, f_num)
                     ws.write(row, 14, uf); ws.write_formula(row, 15, f'=B{row+1}')
 
-                ws.conditional_format(f'A3:F29', {'type':'formula', 'criteria':'=LEN($B3)>0', 'format':f_orange})
-                ws.conditional_format(f'O3:T29', {'type':'formula', 'criteria':'=LEN($P3)>0', 'format':f_orange})
+                ws.conditional_format('A3:F29', {'type':'formula', 'criteria':'=LEN($B3)>0', 'format':f_orange})
+                ws.conditional_format('O3:T29', {'type':'formula', 'criteria':'=LEN($P3)>0', 'format':f_orange})
 
             st.download_button("📥 BAIXAR RELATÓRIO DIAMANTE", output.getvalue(), "Diamond_Tax_Audit.xlsx")
 else:
-    st.info("💡 Insira um CNPJ válido na barra lateral e clique em LIBERAR para começar.")
+    st.warning("👈 Insira o CNPJ da empresa na barra lateral para começar.")
