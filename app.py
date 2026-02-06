@@ -194,11 +194,36 @@ if st.session_state['confirmado']:
     chaves_canceladas = set()
     if file_status:
         try:
-            skip = 0 if file_status.name.endswith('.csv') else 2
-            df_status = pd.read_csv(file_status, skiprows=skip) if file_status.name.endswith('.csv') else pd.read_excel(file_status, skiprows=2)
-            mask = df_status.iloc[:, 14].astype(str).str.upper().str.contains("CANCEL", na=False)
-            chaves_canceladas = set(df_status[mask].iloc[:, 10].astype(str).str.replace('NFe', '').str.strip())
-        except: st.error("Erro no relatório SIEG.")
+            # CORREÇÃO: Lógica ajustada para o formato do CSV do usuário
+            # O cabeçalho real está na linha 3 (índice 2)
+            if file_status.name.endswith('.csv'):
+                # Lê pulando as primeiras linhas de metadados
+                df_status = pd.read_csv(file_status, header=2, sep=',', encoding='utf-8', on_bad_lines='skip')
+            else:
+                df_status = pd.read_excel(file_status, header=2)
+            
+            # Normalizar nomes das colunas para evitar erros de case/espaço
+            df_status.columns = df_status.columns.str.strip().str.upper()
+
+            # Tenta localizar as colunas pelo nome, é mais seguro que pelo índice fixo
+            # Procura coluna que contenha "STATUS" e coluna que contenha "CHAVE"
+            col_status = next((c for c in df_status.columns if 'STATUS' in c), None)
+            col_chave = next((c for c in df_status.columns if 'CHAVE' in c), None)
+
+            if col_status and col_chave:
+                mask = df_status[col_status].astype(str).str.upper().str.contains("CANCEL", na=False)
+                # Extrai as chaves, garantindo que só fiquem números
+                chaves_canceladas = set(
+                    df_status.loc[mask, col_chave]
+                    .astype(str)
+                    .str.replace(r'\D', '', regex=True) # Remove NFe, espaços, letras
+                    .str.strip()
+                )
+            else:
+                st.warning("⚠️ Aviso: Colunas de 'Chave' ou 'Status' não identificadas automaticamente no relatório SIEG. Verifique o arquivo.")
+
+        except Exception as e: 
+            st.error(f"Erro no relatório SIEG: {e}")
 
     if uploaded_files and st.button("🚀 INICIAR APURAÇÃO DIAMANTE"):
         dados_totais, chaves_unicas = [], set()
