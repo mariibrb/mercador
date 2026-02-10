@@ -1,4 +1,4 @@
-import streamlit as st
+dimport streamlit as st
 import pandas as pd
 import xml.etree.ElementTree as ET
 import re
@@ -7,7 +7,7 @@ import zipfile
 import random
 
 # --- CONFIGURAÇÃO E ESTILO (DESIGN UNIFICADO E TRAVADO) ---
-st.set_page_config(page_title="DIAMOND TAX | Premium Audit", layout="wide", page_icon="💎")
+st.set_page_config(page_title="Mercador", layout="wide", page_icon="💎")
 
 # --- CONFIGURAÇÃO DE APARÊNCIA (COR ROSA ESPECIFICADA) ---
 COR_ROSA_CLARINHO = '#FFEBFA' 
