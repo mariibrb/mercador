@@ -7,7 +7,7 @@ import zipfile
 import random
 
 # --- CONFIGURAÇÃO E ESTILO (DESIGN UNIFICADO E TRAVADO) ---
-st.set_page_config(page_title="MERCADOR", layout="wide", page_icon="💎")
+st.set_page_config(page_title="MERCADOR", layout="wide", page_icon="🗺️")
 
 # --- CONFIGURAÇÃO DE APARÊNCIA (COR ROSA ESPECIFICADA) ---
 COR_ROSA_CLARINHO = '#FFEBFA' 
@@ -140,7 +140,7 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
     except: return []
 
 # --- INTERFACE ---
-st.markdown("<h1>💎 MERCADOR</h1>", unsafe_allow_html=True)
+st.markdown("<h1>🗺️ MERCADOR</h1>", unsafe_allow_html=True)
 
 # SEÇÃO SEMPRE VISÍVEL: PASSO A PASSO E OBJETIVOS
 with st.container():
