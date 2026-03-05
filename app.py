@@ -124,7 +124,7 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
         tp_nf = buscar_tag_recursiva('tpNF', ide)
         tipo = "SAIDA" if (cnpj_emit == cnpj_alvo and tp_nf == "1") else "ENTRADA"
         
-        # LOGICA RESTAURADA: Busca recursiva de IEST
+        # LOGICA DE IEST MANTIDA
         iest_doc = buscar_tag_recursiva('IEST', emit) if tipo == "SAIDA" else buscar_tag_recursiva('IEST', dest)
         
         uf_fiscal = buscar_tag_recursiva('UF', dest) if tipo == "SAIDA" else (buscar_tag_recursiva('UF', dest) if buscar_tag_recursiva('UF', emit) == 'SP' else buscar_tag_recursiva('UF', emit))
@@ -152,7 +152,7 @@ with st.container():
         <div class="instrucoes-card">
             <h3>📖 Passo a Passo</h3>
             <ol>
-                <li><b>Relatório SIEG:</b> Suba os arquivos CSV ou XLSX de Status para filtrar notas canceladas (pode ser mais de um).</li>
+                <li><b>Relatório SIEG:</b> Suba os arquivos CSV ou XLSX de Status para filtrar notas canceladas ou rejeitadas.</li>
                 <li><b>Arquivos XML:</b> Arraste seus arquivos XML ou pastas ZIP para a área de upload.</li>
                 <li><b>Processamento:</b> Clique no botão <b>"INICIAR APURAÇÃO DIAMANTE"</b>.</li>
                 <li><b>Download:</b> Baixe o Excel final com as abas de listagem e resumo por estado.</li>
@@ -198,7 +198,6 @@ if st.session_state['confirmado']:
     if files_status:
         for f_status in files_status:
             try:
-                # AJUSTE PARA O PRINT: header=1 lê a linha 2 corretamente
                 if f_status.name.endswith('.csv'):
                     df_status = pd.read_csv(f_status, header=1, sep=',', encoding='utf-8', on_bad_lines='skip')
                 else:
@@ -206,12 +205,15 @@ if st.session_state['confirmado']:
                 
                 df_status.columns = df_status.columns.str.strip().str.upper()
 
-                # Busca flexível por CHAVE e STATUS conforme o print enviado
                 col_status = next((c for c in df_status.columns if 'STATUS' in c), None)
                 col_chave = next((c for c in df_status.columns if 'CHAVE' in c), None)
 
                 if col_status and col_chave:
-                    mask = df_status[col_status].astype(str).str.upper().str.contains("CANCEL", na=False)
+                    # AJUSTE: Agora busca por CANCEL ou REJEITADA
+                    mask = (
+                        df_status[col_status].astype(str).str.upper().str.contains("CANCEL", na=False) | 
+                        df_status[col_status].astype(str).str.upper().str.contains("REJEIT", na=False)
+                    )
                     novas_chaves = set(
                         df_status.loc[mask, col_chave]
                         .astype(str)
@@ -226,7 +228,7 @@ if st.session_state['confirmado']:
                 st.error(f"Erro no relatório {f_status.name}: {e}")
         
         if chaves_canceladas:
-            st.success(f"✅ {len(chaves_canceladas)} notas canceladas identificadas nos relatórios.")
+            st.success(f"✅ {len(chaves_canceladas)} notas (Canceladas/Rejeitadas) identificadas.")
 
     if uploaded_files and st.button("🚀 INICIAR APURAÇÃO DIAMANTE"):
         dados_totais, chaves_unicas = [], set()
@@ -283,7 +285,7 @@ if st.session_state['confirmado']:
                         ws.write_formula(row, i+9, f'=SUMIFS(LISTAGEM_XML!{col_let}:{col_let}, LISTAGEM_XML!D:D, "{uf}", LISTAGEM_XML!C:C, "ENTRADA")', f_num)
                         col_s, col_e = chr(65 + i + 2), chr(65 + i + 9)
                         if i == 1: 
-                            f_sal = f'=IF(B{row+1}<>"", IF(A{row+1}="RJ", ({col_s}{row+1}-{col_e}{row+1})-(E{row+1}-L{row+1}), {col_s}{row+1}-{col_e}{row+1}), {col_s}{row+1})'
+                            f_sal = f'=IF(B{row+1}<>"", IF(A{row+1}="RJ", ({col_s}{row+1}-{col_e}{row+1})-(E{row+1}-L{row+1}), {col_s}{row+1}-{col_e}{row+1}), {col_s}{row+1}-{col_e}{row+1})'
                         else:
                             f_sal = f'=IF(B{row+1}<>"", {col_s}{row+1}-{col_e}{row+1}, {col_s}{row+1})'
                         ws.write_formula(row, i+16, f_sal, f_num)
