@@ -200,18 +200,24 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
         xml_str = re.sub(r'\sxmlns(:\w+)?="[^"]+"', '', content.decode('utf-8', errors='ignore'))
         root = ET.fromstring(xml_str)
         infNFe = root.find('.//infNFe')
-        chave = infNFe.attrib.get('Id', '')[3:] if infNFe is not None else ""
+        # Limpeza rigorosa da chave
+        chave_raw = infNFe.attrib.get('Id', '')[3:] if infNFe is not None else ""
+        chave = re.sub(r'\D', '', chave_raw)
+        
         if not chave or chave in chaves_processadas or chave in chaves_canceladas: return []
         chaves_processadas.add(chave)
+        
         emit, dest, ide = root.find('.//emit'), root.find('.//dest'), root.find('.//ide')
         cnpj_emit = re.sub(r'\D', '', buscar_tag_recursiva('CNPJ', emit) or "")
         cnpj_alvo = re.sub(r'\D', '', cnpj_auditado)
         tp_nf = buscar_tag_recursiva('tpNF', ide)
         tipo = "SAIDA" if (cnpj_emit == cnpj_alvo and tp_nf == "1") else "ENTRADA"
+        
         if tipo == "SAIDA":
             iest_cabecalho = (buscar_tag_recursiva("IEST", emit) or buscar_tag_recursiva("IEST", dest) or "").strip()
         else:
             iest_cabecalho = (buscar_tag_recursiva("IEST", dest) or buscar_tag_recursiva("IEST", emit) or "").strip()
+            
         detalhes = []
         for det in _listar_dets(root):
             prod = _filho_direto_tag(det, 'prod')
@@ -227,6 +233,7 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
             uf_fiscal = uf_fiscal_por_item(tipo, emit, dest, imp)
             iest_doc = coletar_iests_imposto(imp, iest_cabecalho)
             difal_val = safe_float(buscar_tag_recursiva('vICMSUFDest', imp)) + safe_float(buscar_tag_recursiva('vFCPUFDest', imp))
+            
             detalhes.append({
                 "CHAVE": chave, "NUM_NF": buscar_tag_recursiva('nNF', ide), "TIPO": tipo, "UF_FISCAL": uf_fiscal, "IEST_DOC": str(iest_doc).strip(), "CFOP": cfop,
                 "ST": safe_float(buscar_tag_recursiva('vICMSST', icms)) + safe_float(buscar_tag_recursiva('vFCPST', icms)),
@@ -262,7 +269,7 @@ with st.container():
                 <li><b>Cálculo DIFAL/ST/FCP:</b> Apuração automática por UF.</li>
                 <li><b>Regra RJ:</b> Abatimento automático de FCP no DIFAL.</li>
                 <li><b>Relatório Inteligente:</b> Excel formatado com destaque Rosa nas IESTs.</li>
-                <li><b>Aba CANCELADAS_SIEG:</b> Registro de notas descartadas.</li>
+                <li><b>Aba CANCELADAS_SIEG:</b> Registro detalhado de todas as notas descartadas.</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -297,6 +304,7 @@ if st.session_state['confirmado']:
             try:
                 df_status = pd.read_excel(f_status, header=1) if f_status.name.endswith('.xlsx') else pd.read_csv(f_status, header=1)
                 df_status.columns = [str(c).strip().upper() for c in df_status.columns]
+                
                 col_status = next((c for c in df_status.columns if 'STATUS' in c), None)
                 col_chave = next((c for c in df_status.columns if 'CHAVE' in c), None)
 
@@ -304,41 +312,60 @@ if st.session_state['confirmado']:
                     s_status, s_chave = df_status[col_status], df_status[col_chave]
                     for idx in df_status.index:
                         k = re.sub(r'\D', '', str(s_chave.loc[idx]))
-                        if k: mapa_autenticidade[k] = str(s_status.loc[idx]).strip()
-                    mask = (s_status.astype(str).str.upper().str.contains("CANCEL", na=False) | s_status.astype(str).str.upper().str.contains("REJEI", na=False))
-                    for idx in df_status.loc[mask].index:
-                        k = re.sub(r'\D', '', str(s_chave.loc[idx]))
                         if k:
-                            chaves_canceladas.add(k)
-                            linhas_canceladas.append({'CHAVE': k, 'ARQUIVO': f_status.name, 'STATUS': str(s_status.loc[idx])})
+                            txt_status = str(s_status.loc[idx]).strip()
+                            mapa_autenticidade[k] = txt_status
+                            
+                            if "CANCEL" in txt_status.upper() or "REJEI" in txt_status.upper():
+                                chaves_canceladas.add(k)
+                                linhas_canceladas.append({
+                                    'CHAVE': k, 
+                                    'ARQUIVO': f_status.name, 
+                                    'STATUS_SIEG': txt_status
+                                })
+                else:
+                    st.warning(f"⚠️ Colunas não identificadas no arquivo {f_status.name}.")
             except Exception as e: st.error(f"Erro no SIEG: {e}")
-        if chaves_canceladas: st.success(f"✅ {len(chaves_canceladas)} notas descartadas.")
+            
+        if chaves_canceladas:
+            st.success(f"✅ {len(chaves_canceladas)} notas (Canceladas/Rejeitadas) identificadas para exclusão.")
 
     if uploaded_files and st.button("🚀 INICIAR APURAÇÃO DIAMANTE"):
         dados_totais, chaves_unicas = [], set()
         with st.status("💎 Analisando...", expanded=True):
             for f in uploaded_files:
                 f_bytes = f.read()
-                if f.name.endswith('.xml'): dados_totais.extend(processar_xml(f_bytes, cnpj_limpo, chaves_unicas, chaves_canceladas))
+                if f.name.endswith('.xml'):
+                    res = processar_xml(f_bytes, cnpj_limpo, chaves_unicas, chaves_canceladas)
+                    dados_totais.extend(res)
                 elif f.name.endswith('.zip'):
                     with zipfile.ZipFile(io.BytesIO(f_bytes)) as z_in:
                         for n in z_in.namelist():
-                            if n.lower().endswith('.xml'): dados_totais.extend(processar_xml(z_in.read(n), cnpj_limpo, chaves_unicas, chaves_canceladas))
+                            if n.lower().endswith('.xml'):
+                                res = processar_xml(z_in.read(n), cnpj_limpo, chaves_unicas, chaves_canceladas)
+                                dados_totais.extend(res)
         
         if dados_totais:
             output = io.BytesIO()
             df_listagem = pd.DataFrame(dados_totais)
-            df_listagem['STATUS_AUTENTICIDADE'] = df_listagem['CHAVE'].map(lambda x: mapa_autenticidade.get(re.sub(r'\D', '', str(x)), ''))
+            
+            # Preenchimento garantido da coluna de Status de Autenticidade
+            df_listagem['STATUS_AUTENTICIDADE'] = df_listagem['CHAVE'].map(lambda x: mapa_autenticidade.get(str(x), 'AUTORIZADA'))
             
             ufs_resumo = sorted({u for u in df_listagem['UF_FISCAL'] if u})
             iest_por_uf = {}
             for ufk, g in df_listagem.groupby('UF_FISCAL'):
-                iests = g['IEST_DOC'].fillna('').astype(str).str.strip().unique()
-                iest_por_uf[ufk] = ' | '.join([i for i in iests if i])
+                iests = g['IEST_DOC'].replace('', None).dropna().unique()
+                iest_por_uf[ufk] = ' | '.join([str(i) for i in iests])
 
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df_listagem.to_excel(writer, sheet_name='LISTAGEM_XML', index=False)
-                pd.DataFrame(linhas_canceladas).to_excel(writer, sheet_name='CANCELADAS_SIEG', index=False)
+                
+                # Aba de Canceladas preenchida rigorosamente
+                df_cancel_final = pd.DataFrame(linhas_canceladas)
+                if df_cancel_final.empty:
+                    df_cancel_final = pd.DataFrame(columns=['CHAVE', 'ARQUIVO', 'STATUS_SIEG'])
+                df_cancel_final.to_excel(writer, sheet_name='CANCELADAS_SIEG', index=False)
                 
                 workbook = writer.book
                 ws = workbook.add_worksheet('DIFAL_ST_FECP')
@@ -355,18 +382,13 @@ if st.session_state['confirmado']:
 
                 heads = ['UF', 'IEST', 'ST TOTAL', 'DIFAL TOTAL', 'FCP TOTAL', 'FCPST TOTAL']
                 for i, h in enumerate(heads):
-                    ws.write(1, i, h, f_head)
-                    ws.write(1, i + 7, h, f_head)
-                    ws.write(1, i + 14, h, f_head)
+                    ws.write(1, i, h, f_head); ws.write(1, i + 7, h, f_head); ws.write(1, i + 14, h, f_head)
 
                 for r, uf in enumerate(ufs_resumo):
                     row = r + 2
-                    ws.write(row, 0, uf, f_uf)
-                    ws.write(row, 7, uf, f_uf)
-                    ws.write(row, 14, uf, f_uf)
+                    ws.write(row, 0, uf, f_uf); ws.write(row, 7, uf, f_uf); ws.write(row, 14, uf, f_uf)
                     ws.write_string(row, 1, iest_por_uf.get(uf, ''), f_uf)
-                    ws.write_formula(row, 8, f'=B{row+1}', f_uf)
-                    ws.write_formula(row, 15, f'=B{row+1}', f_uf)
+                    ws.write_formula(row, 8, f'=B{row+1}', f_uf); ws.write_formula(row, 15, f'=B{row+1}', f_uf)
 
                     for i, col_let in enumerate(['G', 'H', 'I', 'J']):
                         ws.write_formula(row, i+2, f'=SUMIFS(LISTAGEM_XML!{col_let}:{col_let}, LISTAGEM_XML!D:D, "{uf}", LISTAGEM_XML!C:C, "SAIDA")', f_num)
@@ -375,9 +397,12 @@ if st.session_state['confirmado']:
                         if i == 1: f_sal = f'=IF(B{row+1}<>"", IF(A{row+1}="RJ", ({col_s}{row+1}-{col_e}{row+1})-(E{row+1}-L{row+1}), {col_s}{row+1}-{col_e}{row+1}), {col_s}{row+1})'
                         else: f_sal = f'=IF(B{row+1}<>"", {col_s}{row+1}-{col_e}{row+1}, {col_s}{row+1})'
                         ws.write_formula(row, i+16, f_sal, f_num)
-                ws.conditional_format('A3:F50', {'type':'formula', 'criteria':'=LEN($B3)>0', 'format':f_pink})
-                ws.conditional_format('O3:T50', {'type':'formula', 'criteria':'=LEN($P3)>0', 'format':f_pink})
+                
+                ws.conditional_format('A3:F100', {'type':'formula', 'criteria':'=LEN($B3)>0', 'format':f_pink})
+                ws.conditional_format('O3:T100', {'type':'formula', 'criteria':'=LEN($P3)>0', 'format':f_pink})
 
-            st.success("💎 Concluído!")
+            st.success("💎 Apuração Concluída!")
             st.download_button("📥 BAIXAR RELATÓRIO", output.getvalue(), "Mercador.xlsx")
+        else:
+            st.error("❌ Nenhuma nota válida encontrada para o CNPJ e status informados.")
 else: st.warning("👈 Insira o CNPJ.")
