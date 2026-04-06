@@ -75,7 +75,7 @@ def aplicar_estilo_rihanna_original():
             text-align: center;
         }
 
-        .stTextInput>div>div>input {
+        .stTextInput>div>div>input, .stTextArea>div>div>textarea {
             border: 2px solid #FFDEEF !important;
             border-radius: 10px !important;
             padding: 10px !important;
@@ -203,9 +203,13 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
         chave_raw = infNFe.attrib.get('Id', '')[3:] if infNFe is not None else ""
         chave = re.sub(r'\D', '', chave_raw)
         
-        if not chave or chave in chaves_processadas or chave in chaves_canceladas: return []
+        if not chave or chave in chaves_processadas: return []
         chaves_processadas.add(chave)
         
+        # DEFINIÇÃO DE MULTIPLICADOR (ZERAR SE CANCELADA)
+        is_cancelada = chave in chaves_canceladas
+        mult = 0.0 if is_cancelada else 1.0
+
         emit, dest, ide = root.find('.//emit'), root.find('.//dest'), root.find('.//ide')
         cnpj_emit = re.sub(r'\D', '', buscar_tag_recursiva('CNPJ', emit) or "")
         cnpj_alvo = re.sub(r'\D', '', cnpj_auditado)
@@ -231,14 +235,17 @@ def processar_xml(content, cnpj_auditado, chaves_processadas, chaves_canceladas)
             if tipo == "ENTRADA" and cfop not in CFOP_DEVOLUCAO: continue
             uf_fiscal = uf_fiscal_por_item(tipo, emit, dest, imp)
             iest_doc = coletar_iests_imposto(imp, iest_cabecalho)
-            difal_val = safe_float(buscar_tag_recursiva('vICMSUFDest', imp)) + safe_float(buscar_tag_recursiva('vFCPUFDest', imp))
+            
+            # VALORES MULTIPLICADOS POR 0 SE CANCELADA MANUALMENTE OU PELO RELATÓRIO
+            st_val = (safe_float(buscar_tag_recursiva('vICMSST', icms)) + safe_float(buscar_tag_recursiva('vFCPST', icms))) * mult
+            difal_val = (safe_float(buscar_tag_recursiva('vICMSUFDest', imp)) + safe_float(buscar_tag_recursiva('vFCPUFDest', imp))) * mult
+            fcp_val = safe_float(buscar_tag_recursiva('vFCPUFDest', imp)) * mult
+            fcpst_val = safe_float(buscar_tag_recursiva('vFCPST', icms)) * mult
             
             detalhes.append({
                 "CHAVE": chave, "NUM_NF": buscar_tag_recursiva('nNF', ide), "TIPO": tipo, "UF_FISCAL": uf_fiscal, "IEST_DOC": str(iest_doc).strip(), "CFOP": cfop,
-                "ST": safe_float(buscar_tag_recursiva('vICMSST', icms)) + safe_float(buscar_tag_recursiva('vFCPST', icms)),
-                "DIFAL": difal_val,
-                "FCP": safe_float(buscar_tag_recursiva('vFCPUFDest', imp)), "FCPST": safe_float(buscar_tag_recursiva('vFCPST', icms)),
-                "ALERTA_DIFAL": alerta_difal_devolucao_iest(imp, tipo, cfop, iest_doc),
+                "ST": st_val, "DIFAL": difal_val, "FCP": fcp_val, "FCPST": fcpst_val,
+                "ALERTA_DIFAL": "" if is_cancelada else alerta_difal_devolucao_iest(imp, tipo, cfop, iest_doc),
             })
         return detalhes
     except: return []
@@ -253,22 +260,22 @@ with st.container():
         <div class="instrucoes-card">
             <h3>📖 Passo a Passo</h3>
             <ol>
-                <li><b>Relatório SIEG:</b> Suba os arquivos de Status (o Mercador encontrará as colunas automaticamente).</li>
+                <li><b>Whitelist/Relatórios:</b> Suba os arquivos SIEG ou use a Blacklist manual na lateral.</li>
                 <li><b>Arquivos XML:</b> Arraste seus arquivos XML ou pastas ZIP.</li>
-                <li><b>Processamento:</b> Clique no botão <b>"INICIAR APURAÇÃO DIAMANTE"</b>.</li>
-                <li><b>Download:</b> Baixe o Excel final com os saldos apurados.</li>
+                <li><b>Saldo do Tesouro:</b> Notas canceladas aparecem na listagem com <b>R$ 0,00</b>.</li>
+                <li><b>Download:</b> Receba o pergaminho final consolidado por UF.</li>
             </ol>
         </div>
         """, unsafe_allow_html=True)
     with m_col2:
         st.markdown("""
         <div class="instrucoes-card">
-            <h3>📊 O que será obtido?</h3>
+            <h3>📊 Controle de Carga</h3>
             <ul>
-                <li><b>Cálculo DIFAL/ST/FCP:</b> Apuração automática por UF.</li>
-                <li><b>Regra RJ:</b> Abatimento automático de FCP no DIFAL.</li>
-                <li><b>Relatório Inteligente:</b> Excel formatado com destaque Rosa nas IESTs.</li>
-                <li><b>Aba CANCELADAS_SIEG:</b> Registro detalhado de notas descartadas.</li>
+                <li><b>Zerar Impostos:</b> Canceladas/Rejeitadas têm seus valores zerados automaticamente.</li>
+                <li><b>Caçador Automático:</b> O sistema detecta os cabeçalhos do SIEG em qualquer linha.</li>
+                <li><b>Regra de Ouro:</b> Lógica de IEST, CFOP e RJ preservada integralmente.</li>
+                <li><b>Transparência:</b> Aba CANCELADAS_SIEG detalha os motivos do descarte.</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -281,6 +288,10 @@ with st.sidebar:
     st.markdown("### 🔍 Configuração")
     cnpj_input = st.text_input("CNPJ DO CLIENTE", placeholder="00.000.000/0001-00")
     cnpj_limpo = "".join(filter(str.isdigit, cnpj_input))
+    
+    st.markdown("### ⚠️ BLACKLIST MANUAL")
+    chaves_manuais_input = st.text_area("Cole chaves canceladas (sem relatório):", placeholder="Uma por linha")
+    
     if cnpj_input and len(cnpj_limpo) != 14: st.error("⚠️ CNPJ inválido.")
     if len(cnpj_limpo) == 14:
         if st.button("✅ LIBERAR OPERAÇÃO"): st.session_state['confirmado'] = True
@@ -298,65 +309,54 @@ if st.session_state['confirmado']:
     linhas_canceladas = []
     mapa_autenticidade = {}
 
+    # Processar Blacklist Manual
+    if chaves_manuais_input:
+        lista_m = re.findall(r'\d{44}', chaves_manuais_input)
+        for c in lista_m:
+            chaves_canceladas.add(c)
+            mapa_autenticidade[c] = "CANCELADA (MANUAL)"
+            linhas_canceladas.append({'CHAVE': c, 'ARQUIVO': 'MANUAL', 'STATUS_SIEG': 'CANCELADA MANUALMENTE'})
+
+    # Processar Relatórios SIEG (Caçador de Cabeçalhos)
     if files_status:
         for f_status in files_status:
             try:
-                # --- BUSCA AUTOMÁTICA DE CABEÇALHO ---
-                # Lê as primeiras 20 linhas para encontrar onde estão as colunas
                 temp_df = pd.read_excel(f_status, header=None, nrows=20) if f_status.name.endswith('.xlsx') else pd.read_csv(f_status, header=None, nrows=20)
-                
                 header_idx = 0
-                found_cols = False
                 for i, row in temp_df.iterrows():
                     row_str = [str(cell).upper() for cell in row]
-                    # Procura por palavras chave na mesma linha
-                    if (any('CHAVE' in s for s in row_str) or any('ID' in s for s in row_str)) and (any('STATUS' in s for s in row_str) or any('SITUA' in s for s in row_str)):
+                    if (any('CHAVE' in s for s in row_str)) and (any('STATUS' in s for s in row_str) or any('SITUA' in s for s in row_str)):
                         header_idx = i
-                        found_cols = True
                         break
                 
-                # Lê o arquivo completo com o header detectado
-                if f_status.name.endswith('.xlsx'):
-                    df_status = pd.read_excel(f_status, header=header_idx)
-                else:
-                    df_status = pd.read_csv(f_status, header=header_idx)
-
+                df_status = pd.read_excel(f_status, header=header_idx) if f_status.name.endswith('.xlsx') else pd.read_csv(f_status, header=header_idx)
                 df_status.columns = [str(c).strip().upper() for c in df_status.columns]
                 col_status = next((c for c in df_status.columns if 'STATUS' in c or 'SITUA' in c), None)
                 col_chave = next((c for c in df_status.columns if 'CHAVE' in c or 'ID' in c), None)
 
                 if col_status and col_chave:
-                    s_status, s_chave = df_status[col_status], df_status[col_chave]
                     for idx in df_status.index:
-                        k = re.sub(r'\D', '', str(s_chave.loc[idx]))
+                        k = re.sub(r'\D', '', str(df_status[col_chave].loc[idx]))
                         if k:
-                            txt_status = str(s_status.loc[idx]).strip()
+                            txt_status = str(df_status[col_status].loc[idx]).strip()
                             mapa_autenticidade[k] = txt_status
-                            
                             if "CANCEL" in txt_status.upper() or "REJEI" in txt_status.upper():
                                 chaves_canceladas.add(k)
                                 linhas_canceladas.append({'CHAVE': k, 'ARQUIVO': f_status.name, 'STATUS_SIEG': txt_status})
-                else:
-                    st.warning(f"⚠️ Aviso: Não consegui identificar as colunas no arquivo {f_status.name}.")
             except Exception as e: st.error(f"Erro no SIEG: {e}")
             
-        if chaves_canceladas:
-            st.success(f"✅ {len(chaves_canceladas)} notas (Canceladas/Rejeitadas) identificadas para exclusão.")
-
     if uploaded_files and st.button("🚀 INICIAR APURAÇÃO DIAMANTE"):
         dados_totais, chaves_unicas = [], set()
         with st.status("💎 Analisando...", expanded=True):
             for f in uploaded_files:
                 f_bytes = f.read()
                 if f.name.endswith('.xml'):
-                    res = processar_xml(f_bytes, cnpj_limpo, chaves_unicas, chaves_canceladas)
-                    dados_totais.extend(res)
+                    dados_totais.extend(processar_xml(f_bytes, cnpj_limpo, chaves_unicas, chaves_canceladas))
                 elif f.name.endswith('.zip'):
                     with zipfile.ZipFile(io.BytesIO(f_bytes)) as z_in:
                         for n in z_in.namelist():
                             if n.lower().endswith('.xml'):
-                                res = processar_xml(z_in.read(n), cnpj_limpo, chaves_unicas, chaves_canceladas)
-                                dados_totais.extend(res)
+                                dados_totais.extend(processar_xml(z_in.read(n), cnpj_limpo, chaves_unicas, chaves_canceladas))
         
         if dados_totais:
             output = io.BytesIO()
@@ -411,7 +411,5 @@ if st.session_state['confirmado']:
                 ws.conditional_format('O3:T100', {'type':'formula', 'criteria':'=LEN($P3)>0', 'format':f_pink})
 
             st.success("💎 Apuração Concluída!")
-            st.download_button("📥 BAIXAR RELATÓRIO", output.getvalue(), "Mercador.xlsx")
-        else:
-            st.error("❌ Nenhuma nota válida encontrada para o CNPJ e status informados.")
+            st.download_button("📥 RECOLHER RELATÓRIO", output.getvalue(), "Mercador.xlsx")
 else: st.warning("👈 Insira o CNPJ.")
